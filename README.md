@@ -62,4 +62,4 @@ cd Career2030-Training-Impact
 - Click "Knit" to generate the full report in HTML/PDF format.
 
 ### **To View the Full Report for This Analysis**
-For a comprehensive analysis of the Career 2030 training program’s impact on employee promotions, including methodology, data preprocessing, causal inference models (NNM, PSM, IPTW), balance checks, sensitivity analyses, and business recommendations, please refer to the full report available in the repository `Career 2030 Report`. 
+For a comprehensive analysis of the Career 2030 training program’s impact on employee promotions, including methodology, data preprocessing, causal inference models (NNM, PSM, IPTW), balance checks, sensitivity analyses, and business recommendations, please refer to the full report available in the repository `Career 2030 Report.pdf`. 
