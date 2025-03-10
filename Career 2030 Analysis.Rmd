@@ -1,0 +1,870 @@
+---
+title: "Career 2030 Training Program Analysis"
+author: "Jordan Meacham"
+output: html_document
+---
+
+
+```{r Libraries}
+# Load Libraries
+library(tidyverse)
+library(ggplot2)
+library(tableone) 
+library(dplyr)
+library(GGally)
+library(moments)
+library(Matching)
+library(caret)
+
+# Load Dataset
+data <- read.csv("TrainingPromoData.csv")
+set.seed(123)
+
+```
+```{r Cleaning}
+
+# Fix education column: Replace -1 with 0 
+data$edu <- ifelse(data$edu <= 0, 0, data$edu)
+
+# Transform variables: children (high skew), weight (high skew), and vacation (moderate skew)
+data <- data %>%
+  mutate(
+    children = log(children + 1),
+    weight = log(weight + 1),
+    vacation = sqrt(vacation)  # Optional
+  )
+
+```
+There are no missing or duplicated values, but the minimum years of education in the `edu` column is -1. Replaced with 0 for all values below 0. Additionally, when skew was observed, `children`, `weight`, and `vacation` were all moderate to highly skewed, so those transformations have been performed.
+```{r Exploration}
+# Summary statistics for numerical variables
+summary(dplyr::select(data, where(is.numeric)))
+
+# Proportions of key variables
+prop.table(table(data$training)) # Proportion of employees in training vs. not
+prop.table(table(data$promoted)) # Proportion of employees promoted vs. not
+
+
+# Visualizing Promotion Rates
+ggplot(data, aes(x = promoted, fill = training)) +
+  geom_bar(position = "dodge") +
+  labs(title = "Promotion Count by Training Status", x = "Promotion", y = "Count") +
+  theme_minimal()
+
+# Salary Distribution
+# Convert salary into an ordered factor
+# data$salary <- factor(data$salary, levels = c("Under $20k", "$20-$40k", "$40-$80k", "> $80k"), ordered = TRUE)
+
+# Visualizing Salary Distribution in Order
+ggplot(data, aes(x = salary)) +
+  geom_bar(fill = "blue", alpha = 0.7) +
+  labs(title = "Salary Distribution (Ordered)", x = "Salary Bracket", y = "Count") +
+  theme_minimal()
+
+# Effect of Training on Promotion
+ggplot(data, aes(x = training, fill = promoted)) +
+  geom_bar(position = "fill") +
+  labs(title = "Proportion of Promotions by Training Status", x = "Training", y = "Proportion") +
+  theme_minimal()
+
+# Distance to Training Facility vs Promotion
+ggplot(data, aes(x = promoted, y = disthome, fill = promoted)) +
+  geom_boxplot() +
+  labs(title = "Distance from Home to Training Facility vs Promotion", x = "Promotion Status", y = "Distance (miles)") +
+  theme_minimal()
+
+# Histogram of promotions
+ggplot(data, aes(x = promoted)) +
+  geom_bar(fill = "blue") +
+  labs(title = "Distribution of Promotions", x = "Promoted", y = "Count")
+
+# Box plot of salary vs. promotion
+ggplot(data, aes(x = promoted, y = salary, fill = promoted)) +
+  geom_boxplot() +
+  labs(title = "Salary Distribution by Promotion Status")
+
+# Correlation matrix
+# ggpairs(data[, c("promoted", "testscore", "salary", "disthome")])
+
+
+# Convert categorical variables to factors if not already
+data <- data %>%
+  mutate(
+    promoted = factor(promoted, levels = c("No", "Yes")),
+    training = factor(training, levels = c("No", "Yes"))
+  )
+
+# # Correlation matrix with distinct colors for density and histograms
+# ggpairs(data[, c("promoted", "testscore", "salary", "disthome")], 
+#         aes(color = promoted, fill = promoted),
+#         upper = list(continuous = wrap("cor", size = 5)),
+#         lower = list(combo = wrap("facetdensity", alpha = 0.5)),
+#         diag = list(continuous = wrap("barDiag", alpha = 0.5))) +
+#   scale_fill_manual(values = c("No" = "red", "Yes" = "blue"), name = "Promotion Status") +
+#   scale_color_manual(values = c("No" = "red", "Yes" = "blue"), name = "Promotion Status") +
+#   theme_minimal() +
+#   theme(legend.position = "right")
+
+# # Correlation matrix to show relationships between key covariates, now stratified by training
+# ggpairs(data[, c("training", "testscore", "salary", "disthome")], 
+#         aes(color = training, fill = training),
+#         upper = list(continuous = wrap("cor", size = 5)),
+#         lower = list(combo = wrap("facetdensity", alpha = 0.5)),
+#         diag = list(continuous = wrap("barDiag", alpha = 0.5))) +
+#   scale_fill_manual(values = c("No" = "red", "Yes" = "blue"), name = "Training Status") +
+#   scale_color_manual(values = c("No" = "red", "Yes" = "blue"), name = "Training Status") +
+#   theme_minimal() +
+#   theme(legend.position = "right")
+
+# Compare Trained vs. Untrained Employees
+p1 <- ggplot(data, aes(x = salary, fill = training)) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(values = c("No" = "red", "Yes" = "blue")) +
+  labs(title = "Salary Distribution by Training Status", x = "Salary Bracket", y = "Count") +
+  theme_minimal()
+
+p2 <- ggplot(data, aes(x = testscore, fill = training)) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(values = c("No" = "red", "Yes" = "blue")) +
+  labs(title = "Test Score Density by Training Status", x = "Test Score", y = "Density") +
+  theme_minimal()
+
+p3 <- ggplot(data, aes(x = training, y = disthome, fill = training)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("No" = "red", "Yes" = "blue")) +
+  labs(title = "Distance from Training Facility by Training Status", x = "Training", y = "Distance (miles)") +
+  theme_minimal()
+
+
+# Compare Promotion Rates
+ggplot(data, aes(x = promoted, fill = training)) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(values = c("No" = "red", "Yes" = "blue")) +
+  labs(title = "Promotion Rate by Training Status", x = "Promotion", y = "Count") +
+  theme_minimal()
+
+# Visualize Pairwise Correlations
+ggpairs(data, columns = c("testscore", "disthome", "salary", "age"),
+        aes(color = training, alpha = 0.5)) +
+  scale_color_manual(values = c("No" = "red", "Yes" = "blue")) +
+  theme_minimal()
+
+# Propensity Score Estimation
+propensity_model <- glm(training ~ salary + testscore + disthome + age + edu + 
+                          sex + race + manager + raise, 
+                        family = binomial, data = data)
+
+data$propensity_score <- predict(propensity_model, type = "response")
+
+# Propensity Score Distribution
+ggplot(data, aes(x = propensity_score, fill = training)) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(values = c("No" = "red", "Yes" = "blue")) +
+  labs(title = "Propensity Score Distribution", x = "Propensity Score", y = "Density") +
+  theme_minimal()
+
+
+```
+No multicollinearity issues.
+
+# Base Model
+```{r Base Model and Pre Matching}
+# Define Covariates
+vars <- setdiff(names(data), c("training", "empid", "promoted"))
+
+# Checking Pre-Matching Balance
+Table1 <- CreateTableOne(vars = vars, strata = "training", data = data, test = FALSE)
+print(Table1, smd = TRUE)
+
+# Inital Baseline Logistic Regression Model (Pre-Matching)
+BaseModel <- glm(formula = (promoted == "Yes") ~ training,
+                 family = binomial(link = "logit"), data = data)
+
+summary(BaseModel)
+print(ShowRegTable(BaseModel, printToggle = FALSE))
+
+```
+The base model, without any adjustment to the dataset, besides transformations, displays a statistically significant treatment of "training," with a 24% increase in odds of promotion given attending the training program. Many variables show great imbalance with SMD's > .1 and .2 and there are significantly more control subjects than treatment subjects. 
+
+Imbalanced variables: raise, salary, mstatus, weight, insurance, flexspend, retcont, disthome, and testscore.
+
+Due to the amount of imbalance, matching techniques will be necessary. 
+
+# 1:1 Nearest Neighbors Matching
+```{r Nearest Neighbors Pre-Processing}
+
+# Identify categorical variables (excluding 'promoted')
+categorical_vars <- setdiff(names(data)[sapply(data, is.factor)], "promoted")
+
+# Convert 'promoted' to a factor if not already
+data$promoted <- as.factor(data$promoted)
+
+vars <- setdiff(names(data), c("training", "empid", "promoted"))
+
+# Convert categorical variables in to factors
+categorical_vars <- sapply(data, function(x) is.character(x) || is.factor(x))
+data[categorical_vars] <- lapply(data[categorical_vars], as.factor)
+
+#remove empid
+data <- data[, setdiff(names(data), "empid")]
+
+#transform variables to dummy variables
+dummies <- dummyVars(~ ., data = data, fullRank = TRUE)
+dataDummy <- predict(dummies, newdata = data) %>% as.data.frame()
+
+# Exclude the treatment indicator of trained from covariaetes
+covX <- dataDummy[,setdiff(names(dataDummy), c("promoted.Yes", "training.Yes"))]
+
+
+```
+
+```{r 1:1 NN Matching; No Caliper}
+library(Matching)
+
+listMatch <- Match(
+  Tr = (dataDummy$training.Yes == 1),  # Ensure binary treatment variable exists
+  X = covX,
+  M = 1,  
+#  caliper = 1.25,  # Variable caliper
+  replace = FALSE,
+  ties = TRUE,
+  version = "fast"
+)
+
+matched_data <- dataDummy[unlist(listMatch[c("index.treated", "index.control")]), ]
+
+
+tabMatched <- (CreateTableOne(
+    vars = names(covX),
+    strata = "training.Yes",
+    data = matched_data,
+    test = FALSE,
+    smd = TRUE  
+  ))
+  
+# Extract SMD values correctly
+smd_values <- as.numeric(unlist(ExtractSmd(tabMatched)))
+  
+# Count covariates with SMD >= 0.1
+num_high_smd <- sum(smd_values >= 0.1, na.rm = TRUE)
+  
+# Get total number of matched pairs
+total_pairs <- length(listMatch$index.treated)
+  
+# Return matched data, TableOne object, and results
+matching_results<- list(
+    matched_data = matched_data,
+    tabMatched = tabMatched,  # Store TableOne object for later use
+    num_high_smd = num_high_smd,
+    total_pairs = total_pairs
+)
+
+MatchedModel_table = matching_results$tabMatched
+print(MatchedModel_table, smd = TRUE)
+print(matching_results$num_high_smd)
+
+```
+To get a baseline for our Nearest Neighbors matching performed 1:1 Nearest Neighbors matching with no caliper. Had 2291 matches, 6 imbalances, and one positivity violation.
+
+```{r NNM Caliper Loop}
+#Loop through various caliper_values 
+caliper_values <- seq(0.55, 2, by = 0.05)
+
+# Initialize storage for results
+smd_counts <- numeric(length(caliper_values))
+pair_counts <- numeric(length(caliper_values))
+
+# Run matching for each caliper value
+set.seed(123)  # For reproducibility
+for (i in seq_along(caliper_values)) {
+  caliper_val <- caliper_values[i]
+  
+  # Perform Nearest Neighbor Matching
+  listMatch <- Match(
+    Tr = (dataDummy$training.Yes == 1),  
+    X = covX,
+    M = 1,
+    caliper = caliper_val,  
+    replace = FALSE,
+    ties = TRUE,
+    version = "fast"
+  )
+  
+  # Check if valid matches were found
+  if (!is.null(listMatch$index.treated) && length(listMatch$index.treated) > 0) {
+    
+    # Extract matched data
+    matched_data <- dataDummy[unlist(listMatch[c("index.treated", "index.control")]), ]
+    
+    # Compute standardized mean differences (SMD)
+    tabMatched <- CreateTableOne(
+      vars = names(covX),
+      strata = "training.Yes",
+      data = matched_data,
+      test = FALSE,
+      smd = TRUE
+    )
+    
+    # Extract SMD values
+    smd_values <- as.numeric(unlist(ExtractSmd(tabMatched)))
+    num_high_smd <- sum(smd_values >= 0.1, na.rm = TRUE)
+    
+    # Store results
+    smd_counts[i] <- num_high_smd
+    pair_counts[i] <- length(listMatch$index.treated)
+  
+  } else {
+    # If no matches found, store NA/zero values
+    smd_counts[i] <- NA
+    pair_counts[i] <- 0
+  }
+}
+
+# Create a dataframe with the results
+NNMatchingResults <- data.frame(caliper_values, smd_counts, pair_counts)
+
+# Print results
+print(NNMatchingResults)
+
+```
+
+```{r 1:1 NNM; 1.10 Caliper}
+library(Matching)
+set.seed(123)
+
+listMatch <- Match(
+  Tr = (dataDummy$training.Yes == 1),  # Ensure binary treatment variable exists
+  X = covX,
+  M = 1,  
+  caliper = 1.10,  # Variable caliper
+  replace = FALSE,
+  ties = TRUE,
+  version = "fast"
+)
+
+matched_data <- dataDummy[unlist(listMatch[c("index.treated", "index.control")]), ]
+
+
+tabMatched <- (CreateTableOne(
+    vars = names(covX),
+    strata = "training.Yes",
+    data = matched_data,
+    test = FALSE,
+    smd = TRUE  
+  ))
+  
+# Extract SMD values correctly
+smd_values <- as.numeric(unlist(ExtractSmd(tabMatched)))
+  
+# Count covariates with SMD >= 0.1
+num_high_smd <- sum(smd_values >= 0.1, na.rm = TRUE)
+  
+# Get total number of matched pairs
+total_pairs <- length(listMatch$index.treated)
+  
+# Return matched data, TableOne object, and results
+matching_results<- list(
+    matched_data = matched_data,
+    tabMatched = tabMatched,  # Store TableOne object for later use
+    num_high_smd = num_high_smd,
+    total_pairs = total_pairs
+)
+
+MatchedModel_table = matching_results$tabMatched
+print(MatchedModel_table, smd = TRUE)
+print(matching_results$num_high_smd)
+```
+Based off of our caliper loop, we see that 1.10 has the lowest number of imbalances. When using 1:1 matching on nearest neighbors with a caliper of 1.10, we saw a substantial improvement in the balance of covariates, but still have a strong imbalance in `disthome` variable. This matching method only results in 105 matched pairs.
+
+```{r 1:1 NN Matching; 1.10 Caliper Interpretation}
+#significance of training w/ matched data
+MatchedModel <- glm(formula = (promoted.Yes == 1) ~ training.Yes,
+                    family = binomial(link = "logit"),
+                    data = matching_results$matched_data)
+print(summary(MatchedModel))
+print(ShowRegTable(MatchedModel, printToggle = FALSE))
+```
+When continuing to use the 1:1 Matching with a caliper of 1.10, we observe a 157% increase in likelihood of being promoted due to participation in the training program (2.59x more likely).
+
+# Propensity Score Matching
+```{r Propensity Score Estimation}
+# Create a Logistic regression model to estimate propensity scores
+# Model predicts the probability of being in the training group based on the covariates
+formula = as.formula(paste("training~", paste(vars, collapse = "+")))
+propensity_model  <- glm(formula, data = data, family = binomial(link = "logit"))
+
+# Propensity scores for all employees
+data_prop_score <- data
+data_prop_score$propensity_score <- predict(propensity_model , type = "response")
+
+# Probability of NOT being trained (used in log-odds calculation later)
+data_prop_score$pNoTrain <- 1 - data_prop_score$propensity_score
+```
+
+```{r ROC AUC}
+# Load library
+library(pROC)
+
+# Compute the ROC curve for propensity score model
+roc_curve <- roc(response = data_prop_score$training, predictor = data_prop_score$propensity_score)
+
+# Plot the ROC curve to assess model discrimination ability
+plot(roc_curve, col = "blue", lwd = 2, main = "ROC Curve for Propensity Score Model")
+
+# Add AUC to the plot
+auc_value <- auc(roc_curve)
+legend("bottomright", legend = paste("AUC =", round(auc_value, 3)), col = "blue", lwd = 2)
+
+```
+The steep initial rise in sensitivity (left side of the curve) suggests that the model captures strong signals that differentiate trained vs. non-trained employees. With AUC = .847, the model had strong disciminatory ability. 
+
+For further interpretation: 84.7% of the time, the model correctly ranks a randomly chosen trained employee higher than a randomly chosen non-trained employee
+
+```{r Propensity Histograms}
+
+# Transformations
+data_prop_score$weight_trans <- log(data_prop_score$weight + 1) 
+data_prop_score$children_trans <- log(data_prop_score$children + 1)
+data_prop_score$vacation_trans <- sqrt(data_prop_score$vacation)
+
+# Define new variables excluding original ones
+vars_trans <- setdiff(names(data_prop_score), c("propensity_score", "promoted", "children", "vacation", "weight", "training"))
+
+# Corrected formula
+formula_trans <- as.formula(paste("training ~", paste(vars_trans, collapse = "+")))
+
+# Train logistic model with transformed variables
+propensity_model_trans  <- glm(formula_trans, data = data_prop_score, family = binomial(link = "logit"))
+
+# Predict using the new model
+data_prop_score$propensity_score_trans <- predict(propensity_model_trans, type = "response")
+
+
+
+# Create histograms for propensity score by training status
+hTrain <- hist(data_prop_score$propensity_score[data_prop_score$training == "Yes"], plot = FALSE, breaks = 20)
+hNoTrain <- hist(data_prop_score$propensity_score[data_prop_score$training == "No"], plot = FALSE, breaks = 20)
+
+# Mirror the "No Training" histogram
+hNoTrain$counts <- -hNoTrain$counts  # Invert for mirroring
+
+# Set plot limits
+hmax <- max(hTrain$counts)
+hmin <- min(hNoTrain$counts)
+plotx <- c(hTrain$breaks, hNoTrain$breaks)
+xmax <- max(plotx)
+xmin <- min(plotx)
+
+# Plot histogram with mirroring effect
+plot(hTrain, ylim = c(hmin, hmax), col = rgb(0, 1, 0, 0.5), xlim = c(xmin, xmax),
+     xlab = 'Propensity Score', main = "Mirrored Histogram of Propensity Scores by Training",
+     yaxt = 'n', ylab = '')
+
+# Overlay "No Training" histogram
+lines(hNoTrain, col = rgb(0, 0, 1, 0.5))
+
+# Add horizontal axis and adjusted legend
+abline(h = 0, col = "black")
+legend("bottomright", legend = c("Training", "No Training"), fill = c("green", "blue"), border = NA, cex = 0.8)
+
+
+
+```
+From the mirrored histogram, we can see sufficient overlap in mid range (0.3 - 0.7), showing there is a reasonable pool of employees to match on propensity scores. This supports feasibility of Propensity Score Matching to create comparable groups. From this histogram we also see low overlap at extremes (0.0 - 0.2 and 0.8 - 1.0). Meaning, employees with very low propensity scores (near 0) are almost exclusively non-trained, and employees with very high propensity scores (near 1) are almost exclusively trained. Due to these insights we know matching in the extreme regions will be difficult, meaning some employees may need to be discarded in PSM by trimming.
+
+
+```{r Propensity Matching with 0.31 Caliper}
+set.seed(123)
+
+dataDummy$propensity_score <- data_prop_score$propensity_score_trans
+
+listMatch <- Match(
+    Tr = (dataDummy$training.Yes == 1),  
+    X = log((dataDummy$propensity_score) / (1 - dataDummy$propensity_score)),      
+    M = 1,                  
+    caliper = 0.31,        
+    replace = FALSE,
+    ties = TRUE,
+    version = "fast"
+  )
+  
+# Extract matched data
+matched_data <- dataDummy[unlist(listMatch[c("index.treated", "index.control")]), ]
+  
+
+tabMatched <- suppressWarnings(CreateTableOne(
+      vars = setdiff(names(dataDummy), c("training.Yes","promoted.Yes")),
+      strata = "training.Yes",
+      data = matched_data,
+      test = FALSE,
+      smd = TRUE  # Ensure SMD is computed
+    ))
+    
+# Extract SMD values correctly
+smd_values <- as.numeric(unlist(ExtractSmd(tabMatched)))
+    
+# Count covariates with SMD >= 0.1
+num_high_smd <- sum(smd_values >= 0.1, na.rm = TRUE)
+    
+# Get total number of matched pairs
+total_pairs <- length(listMatch$index.treated)
+    
+# Return matched data, TableOne object, and results
+matching_results<- list(
+      matched_data = matched_data,
+      tabMatched = tabMatched,  # Store TableOne object for later use
+      num_high_smd = num_high_smd,
+      total_pairs = total_pairs 
+      )
+    
+PSMatching_table <- matching_results$tabMatched
+print(PSMatching_table, smd = TRUE)
+print(matching_results$num_high_smd)
+
+```
+```{r Propensity Matching Regression}
+PSmatchedModel <- glm(formula = promoted.Yes == 1 ~ training.Yes,  
+                      family = binomial(link = "logit"),  
+                      data = matching_results$matched_data)
+
+print(summary(PSmatchedModel))
+print(ShowRegTable(PSmatchedModel, printToggle = FALSE))
+```
+```{r Propensity Matching with 0.002 Caliper}
+set.seed(123)
+
+dataDummy$propensity_score <- data_prop_score$propensity_score_trans
+
+listMatch <- Match(
+    Tr = (dataDummy$training.Yes == 1),  
+    X = log((dataDummy$propensity_score) / (1 - dataDummy$propensity_score)),      
+    M = 1,                  
+    caliper = .002,        
+    replace = FALSE,
+    ties = TRUE,
+    version = "fast"
+  )
+  
+# Extract matched data
+matched_data <- dataDummy[unlist(listMatch[c("index.treated", "index.control")]), ]
+  
+
+tabMatched <- suppressWarnings(CreateTableOne(
+      vars = setdiff(names(dataDummy), c("training.Yes","promoted.Yes")),
+      strata = "training.Yes",
+      data = matched_data,
+      test = FALSE,
+      smd = TRUE  # Ensure SMD is computed
+    ))
+    
+# Extract SMD values correctly
+smd_values <- as.numeric(unlist(ExtractSmd(tabMatched)))
+    
+# Count covariates with SMD >= 0.1
+num_high_smd <- sum(smd_values >= 0.1, na.rm = TRUE)
+    
+# Get total number of matched pairs
+total_pairs <- length(listMatch$index.treated)
+    
+# Return matched data, TableOne object, and results
+matching_results<- list(
+      matched_data = matched_data,
+      tabMatched = tabMatched,  # Store TableOne object for later use
+      num_high_smd = num_high_smd,
+      total_pairs = total_pairs 
+      )
+    
+PSMatching_table <- matching_results$tabMatched
+print(PSMatching_table, smd = TRUE)
+print(matching_results$num_high_smd)
+
+```
+```{r Propensity Matching Regression, 0.31 Caliper}
+PSmatchedModel <- glm(formula = promoted.Yes == 1 ~ training.Yes,  
+                      family = binomial(link = "logit"),  
+                      data = matching_results$matched_data)
+
+print(summary(PSmatchedModel))
+print(ShowRegTable(PSmatchedModel, printToggle = FALSE))
+```
+
+
+From doing Propensity Score Matching on largest the optimal caliper (.31), we can now see that all covariates are balanced with a singular positivity violation in Insurance, medicare & medicaid (even though we are using the largest optimal caliper. When using the caliper .31, we found that training is statistically significant, increasing the odds of promotion by 134% (2.34x more likely). This caliper has 1503 subjects in treatment and control.
+
+When using the caliper that minimizes SMDs the most (0.002), we see that training is still statistically significant, increasing the odds of promotion by 157% (2.57x more likely). For this caliper there 1297 subjects in treatment and control groups. We see the same violation in positivity within the subsection of insurance, but due to the sections of insurance not being mutually exclusive, this could potentially not be an issue.
+
+
+```{r PSM Caliper Loop}
+# Define a sequence of caliper values to test
+caliper_values <- seq(0.0001, 0.4, by = 0.005)
+
+# Initialize storage for results
+smd_counts <- numeric(length(caliper_values))
+pair_counts <- numeric(length(caliper_values))
+
+# Run matching for each caliper value
+set.seed(123)  # For reproducibility
+for (i in seq_along(caliper_values)) {
+  caliper_val <- caliper_values[i]
+  
+  # Perform Propensity Score Matching
+  listMatch <- Match(
+    Tr = (dataDummy$training.Yes == 1),
+    X = log((dataDummy$propensity_score) / (1 - dataDummy$propensity_score)),
+    M = 1,
+    caliper = caliper_val,
+    replace = FALSE,
+    ties = TRUE,
+    version = "fast"
+  )
+  
+  # Check if valid matches were found
+  if (!is.null(listMatch$index.treated) && length(listMatch$index.treated) > 0) {
+    
+    # Extract matched data
+    matched_data <- dataDummy[unlist(listMatch[c("index.treated", "index.control")]), ]
+    
+    # Compute standardized mean differences (SMD)
+    tabMatched <- suppressWarnings(CreateTableOne(
+      vars = setdiff(names(dataDummy), c("training.Yes", "promoted.Yes")),
+      strata = "training.Yes",
+      data = matched_data,
+      test = FALSE,
+      smd = TRUE
+    ))
+    
+    # Extract SMD values
+    smd_values <- as.numeric(unlist(ExtractSmd(tabMatched)))
+    num_high_smd <- sum(smd_values >= 0.1, na.rm = TRUE)
+    
+    # Store results
+    smd_counts[i] <- num_high_smd
+    pair_counts[i] <- length(listMatch$index.treated)
+  
+  } else {
+    # If no matches found, store NA/zero values
+    smd_counts[i] <- NA
+    pair_counts[i] <- 0
+  }
+}
+
+# Create a dataframe with the results
+PSMatchingResults <- data.frame(caliper_values, smd_counts, pair_counts)
+
+# Print results
+print(PSMatchingResults)
+
+
+
+```
+
+
+
+
+
+```{r Wilcoxon Signed-Rank Test}
+
+# Extract matched treatment and control groups
+treated <- matching_results$matched_data$promoted.Yes[matching_results$matched_data$training.Yes == 1]
+control <- matching_results$matched_data$promoted.Yes[matching_results$matched_data$training.Yes == 0]
+
+# Ensure both groups have the same length (required for paired test)
+min_length <- min(length(treated), length(control))
+treated <- treated[1:min_length]
+control <- control[1:min_length]
+
+# Perform Wilcoxon Signed-Rank Test for paired data
+wilcox_test <- wilcox.test(treated, control, paired = TRUE)
+
+# Print results
+print(wilcox_test)
+
+
+```
+V = the sum of differences between treated and control groups and allows us to measure the difference in distributions between the groups. 
+
+Our p-value is extremely small, indicating there is strong evidence against the null hypothesis, meaning our observed difference is statistically significant. In other words, the treatment (training.Yes = 1) likely had a significant effect on the outcome (promoted.Yes).
+
+
+```{r Sensitivity Analysis}
+
+# Store original model results
+original_model <- glm(promoted.Yes ~ training.Yes, family = binomial(link = "logit"), data = matching_results$matched_data)
+original_coef <- coef(summary(original_model))["training.Yes", "Estimate"]
+
+# Initialize vector to store results
+leave_one_out_results <- numeric(nrow(matching_results$matched_data))
+
+# Loop over each observation, removing one matched pair at a time
+for (i in 1:nrow(matching_results$matched_data)) {
+  temp_data <- matching_results$matched_data[-i, ]  # Remove one matched pair
+  temp_model <- glm(promoted.Yes ~ training.Yes, family = binomial(link = "logit"), data = temp_data)
+  leave_one_out_results[i] <- coef(summary(temp_model))["training.Yes", "Estimate"]
+}
+
+# Compute mean and standard deviation of estimates
+mean_effect <- mean(leave_one_out_results)
+sd_effect <- sd(leave_one_out_results)
+
+# Print results
+print(paste("Mean Treatment Effect (Leave-One-Out):", round(mean_effect, 4)))
+print(paste("Standard Deviation of Effect:", round(sd_effect, 4)))
+
+# Plot results
+hist(leave_one_out_results, breaks = 20, col = "lightblue",
+     main = "Leave-One-Out Sensitivity Analysis",
+     xlab = "Estimated Treatment Effect (Logit Coefficient)")
+abline(v = original_coef, col = "red", lwd = 2, lty = 2)  # Mark original effect size
+
+
+
+```
+To interpret this visualization, we estimated the effect of Training.Yes on Promoted.Yes for each iteration where one matched pair was removed. The values range between ~0.944 and ~0.948, meaning the treatment effect does not fluctuate significantly. The height of each bar represents the number of times a specific logit coefficient value was observed across leave-one-out iterations. Most frequently observed estimates are centered around 0.9456. The red dashed line represents the original treatment effect before removing any observations.Since the distribution of estimates remains very close to this line, it indicated stability across the estimated treatment effect. Based on the results of our sensitivity analysis we know the treatment effect remains consistent, no single observation is overly influential, and robust to outliers. Because the effect remains stable and no single pairs drastically changed the effect, no hidden biases are indicated, so we have stable and reliable results. 
+
+# Inverse Probability Treatment Weighting
+```{r Pre-Processing}
+set.seed(123)
+library(survey)
+
+tpd <- read.csv("TrainingPromoData.csv") 
+tpd$propensity_score <- data_prop_score$propensity_score_trans
+
+# Define Covariates Used for IPTW
+vars <- c("manager", "raise", "salary", "children", "mstatus", "age", "sex", 
+          "edu", "vacation", "weight", "height", "hrfriend", "cxofriend", 
+          "insurance", "flexspend", "retcont", "race", "disthome", "testscore")
+
+# Convert Key Variables
+tpd <- tpd %>%
+  mutate(
+    training = as.factor(training),
+    promoted = ifelse(promoted == "Yes", 1, 0)  # Convert to binary (0/1)
+  )
+
+# Fix education column: Replace -1 with 0 
+data$edu <- ifelse(data$edu == -1, 0, data$edu)
+
+
+# Compute skewness for each numeric variable
+skew_values <- sapply(tpd[, vars], function(x) if(is.numeric(x)) skewness(x, na.rm = TRUE) else NA)
+
+#print(skew_values)
+
+
+tpd <- tpd %>%
+  mutate(
+    children = log(children + 1),
+    weight = log(weight + 1),
+    vacation = sqrt(vacation) 
+  )
+
+```
+
+```{r Fit PSM}
+psModel <- glm(training ~ manager + raise + salary + children + 
+                 mstatus + age + sex + edu + vacation + weight + height + 
+                 hrfriend + cxofriend + insurance + flexspend + retcont + 
+                 race + disthome + testscore, 
+               family = binomial(link = "logit"), 
+               data = tpd)
+
+# Predicted probability of being assigned to Train and No Train
+tpd$pScoreTrain <- predict(psModel, type = "response")
+tpd$pScoreNoTrain <- 1 - tpd$pScoreTrain
+
+```
+
+```{r IPTW Balance Table}
+# Compute probability of actual assignment
+tpd$pAssign <- NA
+tpd$pAssign[tpd$training == "Yes"] <- tpd$pScoreTrain[tpd$training == "Yes"]
+tpd$pAssign[tpd$training == "No"] <- tpd$pScoreNoTrain[tpd$training == "No"]
+
+# Compute IPTW Weights
+tpd$iptw_weight <- 1 / tpd$pAssign  # Standard IPTW weights
+
+# Compute Stabilized IPTW Weights
+pTreat <- mean(tpd$training == "Yes")  # Marginal probability of treatment
+pNoTreat <- 1 - pTreat  # Marginal probability of no treatment
+
+tpd$iptw_weight <- ifelse(tpd$training == "Yes",
+                          pTreat / tpd$pScoreTrain,
+                          pNoTreat / tpd$pScoreNoTrain)
+
+tpdSvy <- svydesign(ids = ~1, data = tpd, weights = ~iptw_weight)
+
+# Construct Table 1 to Check Balance BEFORE trimming 
+# tabWeighted <- svyCreateTableOne(vars = vars, strata = "training", data = tpdSvy, test = FALSE)
+# print(tabWeighted, smd = TRUE)
+
+
+# Trim extreme IPTW weights (top 1%)
+trim_threshold <- quantile(tpd$iptw_weight, 0.99)
+tpd <- tpd %>%
+  filter(iptw_weight <= trim_threshold)
+
+
+# Recompute Survey Design After Trimming
+tpdSvy <- svydesign(ids = ~1, data = tpd, weights = ~iptw_weight)
+
+# Construct Table 1 to Check Balance After Trimming
+tabWeightedTrimmed <- svyCreateTableOne(vars = vars, strata = "training", data = tpdSvy, test = FALSE)
+print(tabWeightedTrimmed, smd = TRUE)
+
+```
+Two covariates with SMDs greater than .2, this will be accounted for in the regression model. Examined `rentcont` and `raise` impact on model and both had no great effect, therefore, they will not be accounted for in the regression model.
+```{r IPTW Final Model }
+glmWeighted <- svyglm(promoted ~ training + disthome + testscore, 
+                      family = binomial(link = "logit"), 
+                      design = tpdSvy)
+# Display results
+summary(glmWeighted)
+
+
+# Compute Odds Ratio for Training Effect on Promotion
+odds_ratio_iptw <- exp(coef(glmWeighted)["trainingYes"])
+CI_iptw <- confint(glmWeighted)["trainingYes", ]
+
+
+cat("Odds Ratio for Training Impact on Promotion (IPTW):", odds_ratio_iptw, "\n")
+cat("Confidence Interval for Training Impact on Promotion (IPTW):", CI_iptw, "\n")
+
+```
+Included `disthome` and `testscore` to ensure any remaining confounding is adjusted for, `raise` was also a potential contender, but after running the model with it accounted for, there was no substantial difference, so we decided to leave it in.
+
+When accounting for `disthome` and `testscore`, we see that those who attended training are 3.87 times (287%) more likely to be promoted. 
+
+# Final Model Comparison - Combined
+```{r Final Comparison}
+# Extract and count SMD >= 0.2 for each model's TableOne object
+count_high_smd <- function(table_obj) {
+  smd_values <- as.numeric(unlist(ExtractSmd(table_obj)))
+  return(sum(smd_values >= 0.2, na.rm = TRUE))
+}
+
+# Count the number of high SMDs for each model
+num_high_smd_base <- count_high_smd(Table1)
+num_high_smd_matched <- count_high_smd(MatchedModel_table)
+num_high_smd_psmatched <- count_high_smd(PSmatchedModel)
+num_high_smd_weighted <- count_high_smd(tabWeightedTrimmed)
+
+# Show the results together
+resTogether <- list(
+  Base = list(Table = ShowRegTable(BaseModel, printToggle = FALSE), SMD_Count = num_high_smd_base),
+  Matched = list(Table = ShowRegTable(MatchedModel , printToggle = FALSE), SMD_Count = num_high_smd_matched),
+  PSMatched = list(Table = ShowRegTable(PSmatchedModel, printToggle = FALSE), SMD_Count = num_high_smd_psmatched),
+  Weighted = list(Table = ShowRegTable(glmWeighted , printToggle = FALSE), SMD_Count = num_high_smd_weighted)
+)
+
+# Print the results
+for (model_name in names(resTogether)) {
+  cat("\n", model_name, "Model Results:\n")
+  print(resTogether[[model_name]]$Table, quote = FALSE)
+  cat("Number of covariates with SMD >= 0.2:", resTogether[[model_name]]$SMD_Count, "\n")
+}
+
+```
+
+When evaluating all of our models together, we see that all of them aligned in that training had a positive effect in increasing the odds of promotion. The exact increases vary by model from 24% to 287%. The only model without any SMD violations at all is the propensity score based matched model. However, we do have to keep in mind that it did have a singular violation of positivity. 
+
+Due to these results, we are confident that training was effective. There could still be hidden biases in the data, however, our sensitivity analysis via the "Leave-One-Out" method demonstrated that they will not greatly impact the outcome, as our model is robust. 
